@@ -1,0 +1,4 @@
+/venv/
+/persist/
+/llm_search/__pycache__/
+.env
