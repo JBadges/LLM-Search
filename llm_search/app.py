@@ -24,12 +24,6 @@ def on_clicked(icon, item):
     app_window.deiconify()
     app_window.state('normal')
 
-def on_quit(icon, item):
-    searcher.shutdown()
-    indexer.stop_indexer_thread()
-    icon.stop()
-    app_window.quit()
-
 def setup(icon):
     icon.visible = True
 
@@ -55,6 +49,8 @@ def on_search_input_change(*args):
         current_future.add_done_callback(handle_future_result)
     else:
         clear_results()
+
+indexer.set_index_callback(on_search_input_change)
 
 def handle_future_result(future):
     try:
@@ -166,7 +162,19 @@ class App(tk.Tk):
 
         self.result_tree.bind("<Double-1>", open_file)
 
+    def on_closing(self):
+        self.withdraw()
+        icon.stop()
+        self.destroy()
+        sys.exit()
+
 app_window = App()
+
+def on_quit(icon, item):
+    searcher.shutdown()
+    indexer.stop_indexer_thread()
+    icon.stop()
+    app_window.destroy()
 
 icon_image = load_icon_image(ICON_PATH, size=(32, 32))
 icon = pystray.Icon('name', icon_image, 'LLM Search', menu=pystray.Menu(
@@ -174,5 +182,14 @@ icon = pystray.Icon('name', icon_image, 'LLM Search', menu=pystray.Menu(
     pystray.MenuItem('Quit', on_quit)
 ))
 
-threading.Thread(target=icon.run, daemon=True).start()
-app_window.mainloop()
+icon_thread = threading.Thread(target=icon.run, daemon=True)
+icon_thread.start()
+
+try:
+    app_window.mainloop()
+except Exception as e:
+    logger.error(f"An error occurred in the main loop: {e}")
+finally:
+    searcher.shutdown()
+    indexer.stop_indexer_thread()
+    icon.stop()

@@ -80,4 +80,8 @@ class Searcher:
         with self.lock:
             if self.current_future and not self.current_future.done():
                 self.current_future.cancel()
-            self.executor.shutdown(wait=False)
+            if not self.executor._shutdown:
+                self.executor.shutdown(wait=False)
+                logger.info("Searcher thread stopped.")
+            else:
+                logger.info("Searcher thread is not running.")

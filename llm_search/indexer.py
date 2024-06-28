@@ -15,10 +15,15 @@ from llm_search.extractor import extract_text_from_file, is_text_file
 logger = logging.getLogger(__name__)
 
 class Indexer:
-    def __init__(self):
+    def __init__(self, on_index_update_callback=None):
         self.index = None
         self.indexer_thread = None
         self.stop_event = threading.Event()
+        self.on_index_update_callback = on_index_update_callback if on_index_update_callback else lambda: None
+
+    def set_index_callback(self, callback):
+        """Set the callback function to be called when the index is updated."""
+        self.on_index_update_callback = callback
 
     def init_index(self):
         """Initialize the FAISS index and database."""
@@ -42,6 +47,7 @@ class Indexer:
             embeddings = np.asarray(embeddings)
             ids = np.asarray(ids)
             self.index.add_with_ids(embeddings, ids)
+            self.on_index_update_callback()
 
     def start_indexer_thread(self):
         """Start the indexer thread."""
@@ -54,6 +60,9 @@ class Indexer:
         if self.indexer_thread is not None and self.indexer_thread.is_alive():
             self.stop_event.set()
             self.indexer_thread.join()
+            logger.info("Indexer thread stopped.")
+        else:
+            logger.info("Indexer thread is not running.")
 
     def update_directories_index(self, dirs):
         """Update the index for the specified directories."""
@@ -115,6 +124,7 @@ class Indexer:
                         for chunk_index, embedding in enumerate(embeddings):
                             chunk_id = chunk_ids[chunk_index]
                             self.index.add_with_ids(np.array([embedding]), np.array([chunk_id]))
+                        self.on_index_update_callback()
 
         logger.info("Index update completed.")
 
