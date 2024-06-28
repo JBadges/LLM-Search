@@ -166,7 +166,6 @@ class App(tk.Tk):
         self.withdraw()
         icon.stop()
         self.destroy()
-        sys.exit()
 
 app_window = App()
 
