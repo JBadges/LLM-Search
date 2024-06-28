@@ -22,12 +22,13 @@ def extract_text_from_file(file_path):
         if exclude_dir in file_path:
             return ""
 
-    if is_text_file(file_path):
-        try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                content = file.read()
-                return content
-        except (UnicodeDecodeError, IOError) as e:
-            logger.error(f"Error reading file {file_path}: {e}")
-            return ""
-    return ""
+    if not is_text_file(file_path):
+        return ""
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+            return content
+    except (UnicodeDecodeError, IOError) as e:
+        logger.error(f"Error reading file {file_path}: {e}")
+        return ""

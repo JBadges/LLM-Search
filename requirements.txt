@@ -12,5 +12,4 @@ faiss-cpu
 einops
 sentence-transformers
 transformers
-pywin32
 dotenv
