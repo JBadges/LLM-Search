@@ -1,21 +1,24 @@
 import threading
+from typing import Optional
 import numpy as np
 import sqlite3
 import logging
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from llm_search.config import Config
 from llm_search.embeddings import get_document_embeddings
+from llm_search.indexer import Indexer
 
 logger = logging.getLogger(__name__)
 
 class Searcher:
-    def __init__(self, indexer_ref):
+    """Class to perform vector distance searching from the faiss index in a separate thread."""
+    def __init__(self, indexer_ref: Indexer) -> None:
         self.executor = ThreadPoolExecutor(max_workers=1)  # Single thread executor
         self.current_future = None
         self.indexer_ref = indexer_ref
         self.lock = threading.Lock()
 
-    def search(self, query, top_n=5):
+    def search(self, query: str, top_n: int = 5) -> Optional[Future[list[tuple[str, float]]]]:
         """Submit a search task, canceling any ongoing search."""
         with self.lock:
             if self.current_future and not self.current_future.done():
@@ -23,7 +26,7 @@ class Searcher:
             self.current_future = self.executor.submit(self._search_task, query, top_n)
             return self.current_future
 
-    def _search_task(self, query, top_n):
+    def _search_task(self, query: str, top_n: int) -> list[tuple[str, float]]:
         """Perform the search for similar documents in the database."""
         future = self.current_future
 
@@ -75,7 +78,7 @@ class Searcher:
         logger.debug(f"Search results: {results}")
         return results
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         """Shut down the executor and cancel any ongoing tasks."""
         with self.lock:
             if self.current_future and not self.current_future.done():

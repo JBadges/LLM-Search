@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk, font
 from PIL import Image, ImageTk
 from llm_search.indexer import Indexer
-from llm_search.utils import try_cast_int
+from llm_search.utils import safe_str_to_int
 from llm_search.searcher import Searcher
 import pystray
 import subprocess
@@ -45,7 +45,7 @@ def on_search_input_change(*args):
         if current_future and not current_future.done():
             current_future.cancel()
 
-        current_future = searcher.search(query, top_n=try_cast_int(app_window.top_n_var.get()))
+        current_future = searcher.search(query, top_n=safe_str_to_int(app_window.top_n_var.get()))
         current_future.add_done_callback(handle_future_result)
     else:
         clear_results()

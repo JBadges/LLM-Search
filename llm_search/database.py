@@ -2,9 +2,12 @@ import sqlite3
 import pickle
 import logging
 
+import torch
+
 logger = logging.getLogger(__name__)
 
-def create_database(db_path):
+def create_database(db_path: str) -> None:
+    """Create the database if it does not exist."""
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS embeddings (
@@ -17,7 +20,8 @@ def create_database(db_path):
     conn.commit()
     conn.close()
 
-def insert_or_update_embedding(db_path, file_path, embeddings, last_modified):
+def insert_or_update_embedding(db_path: str, file_path: str, embeddings: torch.Tensor, last_modified: float) -> list[int]:
+    """Insert or update the embeddings for a file in the database. Return the chunk IDs."""
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     
@@ -43,7 +47,8 @@ def insert_or_update_embedding(db_path, file_path, embeddings, last_modified):
     logger.info(f"Updated embeddings for {file_path} in database.")
     return chunk_ids
 
-def get_last_modified_time(db_path, file_path):
+def get_last_modified_time(db_path: str, file_path: str) -> float:
+    """Get the last modified time for the specified file in the database."""
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute('SELECT MAX(last_modified) FROM embeddings WHERE file_path = ?', (file_path,))
@@ -51,7 +56,8 @@ def get_last_modified_time(db_path, file_path):
     conn.close()
     return result[0] if result else None
 
-def load_embeddings(db_path):
+def load_embeddings(db_path: str) -> list[tuple[int, str, int, torch.Tensor]]:
+    """Load all embeddings from the database."""
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute('SELECT id, file_path, chunk_index, embedding FROM embeddings')

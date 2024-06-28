@@ -2,6 +2,7 @@ import os
 import pickle
 import sqlite3
 import threading
+from typing import Callable, List, Optional
 import faiss
 import logging
 
@@ -10,22 +11,23 @@ import numpy as np
 from llm_search.config import Config
 from llm_search.database import create_database, get_last_modified_time, insert_or_update_embedding
 from llm_search.embeddings import get_document_embeddings
-from llm_search.extractor import extract_text_from_file, is_text_file
+from llm_search.extractor import extract_text_from_file
 
 logger = logging.getLogger(__name__)
 
 class Indexer:
-    def __init__(self, on_index_update_callback=None):
+    """Class to index files in the specified directories and update the FAISS index."""
+    def __init__(self, on_index_update_callback: Optional[Callable[[], None]] = None) -> None:
         self.index = None
         self.indexer_thread = None
         self.stop_event = threading.Event()
         self.on_index_update_callback = on_index_update_callback if on_index_update_callback else lambda: None
 
-    def set_index_callback(self, callback):
+    def set_index_callback(self, callback: Optional[Callable[[], None]]) -> None:
         """Set the callback function to be called when the index is updated."""
         self.on_index_update_callback = callback
 
-    def init_index(self):
+    def init_index(self) -> None:
         """Initialize the FAISS index and database."""
         create_database(Config.DB_PATH)
         dimension = get_document_embeddings("test for dimension").shape[1]
@@ -49,13 +51,13 @@ class Indexer:
             self.index.add_with_ids(embeddings, ids)
             self.on_index_update_callback()
 
-    def start_indexer_thread(self):
+    def start_indexer_thread(self) -> None:
         """Start the indexer thread."""
         if self.indexer_thread is None or not self.indexer_thread.is_alive():
             self.indexer_thread = threading.Thread(target=self.update_directories_index, args=(Config.INDEX_DIRECTORIES,))
             self.indexer_thread.start()
 
-    def stop_indexer_thread(self):
+    def stop_indexer_thread(self) -> None:
         """Stop the indexer thread."""
         if self.indexer_thread is not None and self.indexer_thread.is_alive():
             self.stop_event.set()
@@ -64,7 +66,7 @@ class Indexer:
         else:
             logger.info("Indexer thread is not running.")
 
-    def update_directories_index(self, dirs):
+    def update_directories_index(self, dirs: List[str]) -> None:
         """Update the index for the specified directories."""
         if self.get_index() is None:
             self.init_index()
@@ -85,7 +87,8 @@ class Indexer:
                 self.stop_event.wait(remaining_time)
                 elapsed_time += sleep_interval
 
-    def update_index(self, directory, force_update=False):
+    def update_index(self, directory: str, force_update: bool = False) -> None:
+        """Update the index for the specified directory. If force_update is True, update all files regardless of last modified."""
         logger.info(f"Updating index for directory: {directory}...")
         for root, _, files in os.walk(directory):
             if self.stop_event.is_set():
@@ -128,7 +131,7 @@ class Indexer:
 
         logger.info("Index update completed.")
 
-    def get_index(self):
+    def get_index(self) -> Optional[faiss.IndexIDMap]:
         """Get the FAISS index."""
         return self.index
     

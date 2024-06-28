@@ -8,7 +8,8 @@ EXCLUDE_DIRS = [
     'build', 'venv', 'env', 'target', 'docker', 'tmp'
 ]
 
-def is_text_file(file_path):
+def is_text_file(file_path: str) -> bool:
+    """Determine if a file is a text file based on its extension or MIME type."""
     for ending in ['.css', '.xml', '.json', '.yaml', '.yml', '.toml']:
         if file_path.endswith(ending):
             return False
@@ -17,7 +18,8 @@ def is_text_file(file_path):
     mime_type, _ = mimetypes.guess_type(file_path)
     return mime_type and mime_type.startswith('text')
 
-def extract_text_from_file(file_path):
+def extract_text_from_file(file_path: str) -> str:
+    """Extract text from a file, returning an empty string if the file is not a text file."""
     for exclude_dir in EXCLUDE_DIRS:
         if exclude_dir in file_path:
             return ""
