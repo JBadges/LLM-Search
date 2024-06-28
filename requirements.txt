@@ -2,14 +2,12 @@
 torch
 torchvision
 torchaudio
-scikit-learn
 optimum
 numpy<2
 tuna
 pystray
 Pillow
 faiss-cpu
-einops
 sentence-transformers
 transformers
-dotenv
+python-dotenv
