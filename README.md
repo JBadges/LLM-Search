@@ -22,8 +22,10 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 ## Running
-`python -m llm_search.app`
-Run from within the repo directory
+Run `python -m llm_search.app` from within the repo directory
 
 ## Backend
 This project is designed for small document databases such as school notes or text files. Because of this, the backend uses SQLite and Faiss to handle embedding storage and search. By using small open-source LLMs, all embeddings occur on-device, ensuring privacy while still providing fast performance.
+
+## Supported Operating Systems
+This code was only tested on Windows 11, and uses windows specific libraries to check for directory changes.
