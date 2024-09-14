@@ -18,7 +18,7 @@ class Searcher:
         self.indexer_ref = indexer_ref
         self.lock = threading.Lock()
 
-    def search(self, query: str, top_n: int = 5) -> Optional[Future[list[tuple[str, float]]]]:
+    def search(self, query: str, top_n: Optional[int] = 5) -> Optional[Future[list[tuple[str, float]]]]:
         """Submit a search task, canceling any ongoing search."""
         with self.lock:
             if self.current_future and not self.current_future.done():
@@ -26,7 +26,7 @@ class Searcher:
             self.current_future = self.executor.submit(self._search_task, query, top_n)
             return self.current_future
 
-    def _search_task(self, query: str, top_n: int) -> list[tuple[str, float]]:
+    def _search_task(self, query: str, top_n: Optional[int] = None) -> list[tuple[str, float]]:
         """Perform the search for similar documents in the database."""
         future = self.current_future
 
@@ -53,7 +53,7 @@ class Searcher:
         logger.debug(f"Search distances: {distances}, indices: {indices}")
 
         for idx in indices[0]:
-            if future.cancelled():
+            if future and future.cancelled():
                 logger.info("Search task was cancelled.")
                 conn.close()
                 return []

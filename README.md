@@ -15,7 +15,7 @@ INDEX_DIRECTORIES=./notes,./school
 
 ## Installation
 ```bash
-git clone <repo-url>
+git clone https://github.com/JBadges/LLM-Search
 cd llm-search
 python -m venv venv
 .\venv\Scripts\activate

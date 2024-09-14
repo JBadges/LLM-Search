@@ -1,6 +1,7 @@
 import os
 import pickle
 import sqlite3
+import threading
 from typing import Callable, List, Optional
 import faiss
 import logging
@@ -45,8 +46,10 @@ class Indexer:
     """Class to index files in the specified directories and update the FAISS index."""
     def __init__(self, on_index_update_callback: Optional[Callable[[], None]] = None) -> None:
         self.index = None
+        self.update_thread = None
         self.observer = Observer()
         self.on_index_update_callback = on_index_update_callback if on_index_update_callback else lambda: None
+        self.stop_flag = threading.Event()
 
     def set_index_callback(self, callback: Optional[Callable[[], None]]) -> None:
         """Set the callback function to be called when the index is updated."""
@@ -80,14 +83,31 @@ class Indexer:
         if self.get_index() is None:
             self.init_index()
 
+        self.stop_flag.clear()
+        self.update_thread = threading.Thread(target=self._run_initial_check)
+        self.update_thread.start()
+
         handler = FileHandler(self)
         for directory in Config.INDEX_DIRECTORIES:
             self.observer.schedule(handler, directory, recursive=True)
         self.observer.start()
 
     def stop_indexer(self) -> None:
+        self.stop_flag.set()
+        if self.update_thread and self.update_thread.is_alive():
+            self.update_thread.join(timeout=5)  # Wait up to 5 seconds for the thread to finish
+            if self.update_thread.is_alive():
+                logger.warning("Initial index check did not finish in time, but stop flag is set")
         self.observer.stop()
         self.observer.join()
+
+    def _run_initial_check(self):
+        try:
+            logger.info("Starting initial index check and update...")
+            self.check_and_update_index()
+            logger.info("Initial index check and update completed.")
+        except Exception as e:
+            logger.error(f"Error during initial index check: {e}")
 
     def update_indexes(self, directories: List[str]) -> None:
         """Clear the database and re-index all files in the specified directories."""
@@ -167,3 +187,60 @@ class Indexer:
     def get_index(self) -> Optional[faiss.IndexIDMap]:
         """Get the FAISS index."""
         return self.index
+    
+    def check_and_update_index(self) -> None:
+        """Check and update the index to ensure all files are up to date."""
+        logger.info("Checking and updating index...")
+        
+        # Get all file paths in the database
+        conn = sqlite3.connect(Config.DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT DISTINCT file_path FROM embeddings")
+        db_file_paths = set(row[0] for row in c.fetchall())
+        
+        # Get all file paths in the indexed directories
+        current_file_paths = set()
+        for directory in Config.INDEX_DIRECTORIES:
+            for root, _, files in os.walk(directory):
+                for file in files:
+                    if self.stop_flag.is_set():
+                        logger.info("Stopping index check and update due to stop flag")
+                        conn.close()
+                        return
+                    current_file_paths.add(os.path.join(root, file))
+        
+        # Remove entries for files that no longer exist
+        files_to_remove = db_file_paths - current_file_paths
+        for file_path in files_to_remove:
+            if self.stop_flag.is_set():
+                logger.info("Stopping index check and update due to stop flag")
+                conn.close()
+                return
+            logger.info(f"Removing index for deleted file: {file_path}")
+            self.remove_from_index(file_path)
+        
+        # Update entries for existing files
+        files_to_check = db_file_paths.intersection(current_file_paths)
+        for file_path in files_to_check:
+            if self.stop_flag.is_set():
+                logger.info("Stopping index check and update due to stop flag")
+                conn.close()
+                return
+            last_modified = os.path.getmtime(file_path)
+            db_last_modified = get_last_modified_time(Config.DB_PATH, file_path)
+            if db_last_modified is None or last_modified > db_last_modified:
+                logger.info(f"Updating index for modified file: {file_path}")
+                self.update_index(file_path, force_update=False)
+        
+        # Add new files
+        new_files = current_file_paths - db_file_paths
+        for file_path in new_files:
+            if self.stop_flag.is_set():
+                logger.info("Stopping index check and update due to stop flag")
+                conn.close()
+                return
+            logger.info(f"Adding new file to index: {file_path}")
+            self.update_index(file_path, force_update=True)
+        
+        conn.close()
+        logger.info("Index check and update completed.")

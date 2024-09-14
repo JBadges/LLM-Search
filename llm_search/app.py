@@ -38,29 +38,51 @@ def update_results(results):
         filename = os.path.basename(file_path)
         app_window.result_tree.insert("", "end", values=(filename, file_path, f"{similarity:.2f}"))
 
-current_future = None  
+current_future = None
 def on_search_input_change(*args):
     global current_future
     query = app_window.search_var.get().strip()
-    if query:
-        if current_future and not current_future.done():
-            current_future.cancel()
-
-        current_future = searcher.search(query, top_n=safe_str_to_int(app_window.top_n_var.get()))
-        current_future.add_done_callback(handle_future_result)
-    else:
+    
+    if not query:
         clear_results()
+        return
+
+    if current_future is not None and not current_future.done():
+        current_future.cancel()
+
+    try:
+        new_future = searcher.search(query, top_n=safe_str_to_int(app_window.top_n_var.get()))
+        if new_future is not None:
+            current_future = new_future
+            current_future.add_done_callback(handle_future_result)
+        else:
+            logger.warning("Search did not return a valid future.")
+            clear_results()
+    except Exception as e:
+        logger.error(f"Error during search: {e}")
+    clear_results()
 
 indexer.set_index_callback(on_search_input_change)
 
 def handle_future_result(future):
     try:
+        # Handle if the future has been cancelled
+        if future.cancelled():
+            logger.info("Search was canceled.")
+            return
+        
+        # Get the results from the future
         results = future.result()
-        app_window.after(0, update_results, results)
+        if results is not None:
+            app_window.after(0, update_results, results)
+        else:
+            logger.warning("Search returned None results.")
+            clear_results()
     except CancelledError:
-        logger.info("Search was canceled.")
+        logger.info("Future was canceled.")
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
+        logger.error(f"An error occurred during search: {e}")
+        clear_results()
 
 def minimize_to_tray():
     app_window.withdraw()
