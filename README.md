@@ -7,6 +7,7 @@ Create a .env file and set the following parameters
 DB_PATH=<path to the sqllite db file>
 INDEX_DIRECTORIES=<comma seperated list of directories to index>
 ```
+DB_PATH is a file path to where the database will be created, or one that already exists if the program is run already.
 ### Example
 ```
 DB_PATH=./db.sqlite
