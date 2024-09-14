@@ -1,6 +1,5 @@
 import os
 import pickle
-import sqlite3
 import threading
 from typing import Callable, List, Optional
 import faiss
@@ -9,7 +8,7 @@ import logging
 import numpy as np
 
 from llm_search.config import Config
-from llm_search.database import create_database, get_last_modified_time, insert_or_update_embedding
+from llm_search.database import create_database, get_db_connection, get_last_modified_time, insert_or_update_embedding
 from llm_search.embeddings import get_document_embeddings
 from llm_search.extractor import extract_text_from_file
 from watchdog.observers import Observer
@@ -61,12 +60,16 @@ class Indexer:
         dimension = get_document_embeddings("test for dimension").shape[1]
         self.index = faiss.IndexIDMap(faiss.IndexFlatL2(dimension))
 
-        conn = sqlite3.connect(Config.DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT id, embedding FROM embeddings ORDER BY id")
-        results = c.fetchall()
-        conn.close()
-        if results:
+        with get_db_connection(Config.DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute("SELECT id, embedding FROM embeddings ORDER BY id")
+            results = c.fetchall()
+
+        if not results:
+            logger.info("No embeddings found in the database.")
+            return
+        
+        try:
             embeddings = []
             ids = []
             for result in results:
@@ -78,6 +81,12 @@ class Indexer:
             ids = np.asarray(ids)
             self.index.add_with_ids(embeddings, ids)
             self.on_index_update_callback()
+        except (pickle.UnpicklingError, ValueError, TypeError) as e:
+            logger.error(f"Error processing embeddings: {e}")
+        except faiss.RuntimeError as e:
+            logger.error(f"Error adding embeddings to FAISS index: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error during index initialization: {e}")
 
     def start_indexer(self) -> None:
         if self.get_index() is None:
@@ -114,11 +123,10 @@ class Indexer:
         logger.info("Starting force update of all indexes...")
 
         # Clear the database
-        conn = sqlite3.connect(Config.DB_PATH)
-        c = conn.cursor()
-        c.execute("DELETE FROM embeddings")
-        conn.commit()
-        conn.close()
+        with get_db_connection(Config.DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute("DELETE FROM embeddings")
+            conn.commit()
 
         # Clear the FAISS index
         self.index.reset()
@@ -141,16 +149,25 @@ class Indexer:
         db_last_modified = get_last_modified_time(Config.DB_PATH, file_path)
         if force_update or db_last_modified is None or last_modified > db_last_modified:
             text = extract_text_from_file(file_path)
+            # Add a preamble to the text with file information
+            file_name = os.path.basename(file_path)
+            file_extension = os.path.splitext(file_name)[1]
+            preamble = f"""{{
+                "file_name": "{file_name}",
+                "file_path": "{file_path}",
+                "file_extension": "{file_extension}",
+            }}"""
+            text = preamble + "\n\n" + text
             if text and text != "":
                 embeddings = get_document_embeddings(text)
                 chunk_ids = insert_or_update_embedding(Config.DB_PATH, file_path, embeddings, last_modified)
 
                 # Update FAISS index
-                conn = sqlite3.connect(Config.DB_PATH)
-                c = conn.cursor()
-                c.execute('SELECT id, chunk_index FROM embeddings WHERE file_path = ?', (file_path,))
-                existing_chunks = c.fetchall()
-                conn.close()
+                existing_chunks = []
+                with get_db_connection(Config.DB_PATH) as conn:
+                    c = conn.cursor()
+                    c.execute('SELECT id, chunk_index FROM embeddings WHERE file_path = ?', (file_path,))
+                    existing_chunks = c.fetchall()
 
                 existing_chunk_ids = set([chunk_id for chunk_id, _ in existing_chunks])
                 new_chunk_ids = set(chunk_ids)
@@ -170,19 +187,18 @@ class Indexer:
 
     def remove_from_index(self, file_path: str) -> None:
         """Remove the file from both the database and FAISS index."""
-        conn = sqlite3.connect(Config.DB_PATH)
-        c = conn.cursor()
-        c.execute('SELECT id FROM embeddings WHERE file_path = ?', (file_path,))
-        chunk_ids = [row[0] for row in c.fetchall()]
-        
-        if chunk_ids:
-            self.index.remove_ids(np.array(chunk_ids))
-            c.execute('DELETE FROM embeddings WHERE file_path = ?', (file_path,))
-            conn.commit()
-            self.on_index_update_callback()
-        
-        conn.close()
-        logger.info(f"Removed {file_path} from index.")
+        with get_db_connection(Config.DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute('SELECT id FROM embeddings WHERE file_path = ?', (file_path,))
+            chunk_ids = [row[0] for row in c.fetchall()]
+            
+            if chunk_ids:
+                self.index.remove_ids(np.array(chunk_ids))
+                c.execute('DELETE FROM embeddings WHERE file_path = ?', (file_path,))
+                conn.commit()
+                self.on_index_update_callback()
+            
+            logger.info(f"Removed {file_path} from index.")
 
     def get_index(self) -> Optional[faiss.IndexIDMap]:
         """Get the FAISS index."""
@@ -193,54 +209,49 @@ class Indexer:
         logger.info("Checking and updating index...")
         
         # Get all file paths in the database
-        conn = sqlite3.connect(Config.DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT DISTINCT file_path FROM embeddings")
-        db_file_paths = set(row[0] for row in c.fetchall())
-        
-        # Get all file paths in the indexed directories
-        current_file_paths = set()
-        for directory in Config.INDEX_DIRECTORIES:
-            for root, _, files in os.walk(directory):
-                for file in files:
-                    if self.stop_flag.is_set():
-                        logger.info("Stopping index check and update due to stop flag")
-                        conn.close()
-                        return
-                    current_file_paths.add(os.path.join(root, file))
-        
-        # Remove entries for files that no longer exist
-        files_to_remove = db_file_paths - current_file_paths
-        for file_path in files_to_remove:
-            if self.stop_flag.is_set():
-                logger.info("Stopping index check and update due to stop flag")
-                conn.close()
-                return
-            logger.info(f"Removing index for deleted file: {file_path}")
-            self.remove_from_index(file_path)
-        
-        # Update entries for existing files
-        files_to_check = db_file_paths.intersection(current_file_paths)
-        for file_path in files_to_check:
-            if self.stop_flag.is_set():
-                logger.info("Stopping index check and update due to stop flag")
-                conn.close()
-                return
-            last_modified = os.path.getmtime(file_path)
-            db_last_modified = get_last_modified_time(Config.DB_PATH, file_path)
-            if db_last_modified is None or last_modified > db_last_modified:
-                logger.info(f"Updating index for modified file: {file_path}")
-                self.update_index(file_path, force_update=False)
-        
-        # Add new files
-        new_files = current_file_paths - db_file_paths
-        for file_path in new_files:
-            if self.stop_flag.is_set():
-                logger.info("Stopping index check and update due to stop flag")
-                conn.close()
-                return
-            logger.info(f"Adding new file to index: {file_path}")
-            self.update_index(file_path, force_update=True)
-        
-        conn.close()
-        logger.info("Index check and update completed.")
+        with get_db_connection(Config.DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute("SELECT DISTINCT file_path FROM embeddings")
+            db_file_paths = set(row[0] for row in c.fetchall())
+            
+            # Get all file paths in the indexed directories
+            current_file_paths = set()
+            for directory in Config.INDEX_DIRECTORIES:
+                for root, _, files in os.walk(directory):
+                    for file in files:
+                        if self.stop_flag.is_set():
+                            logger.info("Stopping index check and update due to stop flag")
+                            return
+                        current_file_paths.add(os.path.join(root, file))
+            
+            # Remove entries for files that no longer exist
+            files_to_remove = db_file_paths - current_file_paths
+            for file_path in files_to_remove:
+                if self.stop_flag.is_set():
+                    logger.info("Stopping index check and update due to stop flag")
+                    return
+                logger.info(f"Removing index for deleted file: {file_path}")
+                self.remove_from_index(file_path)
+            
+            # Update entries for existing files
+            files_to_check = db_file_paths.intersection(current_file_paths)
+            for file_path in files_to_check:
+                if self.stop_flag.is_set():
+                    logger.info("Stopping index check and update due to stop flag")
+                    return
+                last_modified = os.path.getmtime(file_path)
+                db_last_modified = get_last_modified_time(Config.DB_PATH, file_path)
+                if db_last_modified is None or last_modified > db_last_modified:
+                    logger.info(f"Updating index for modified file: {file_path}")
+                    self.update_index(file_path, force_update=False)
+            
+            # Add new files
+            new_files = current_file_paths - db_file_paths
+            for file_path in new_files:
+                if self.stop_flag.is_set():
+                    logger.info("Stopping index check and update due to stop flag")
+                    return
+                logger.info(f"Adding new file to index: {file_path}")
+                self.update_index(file_path, force_update=True)
+            
+            logger.info("Index check and update completed.")

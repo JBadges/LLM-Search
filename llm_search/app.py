@@ -32,11 +32,21 @@ def clear_results():
     app_window.result_tree.delete(*app_window.result_tree.get_children())
 
 def update_results(results):
-    app_window.result_tree.delete(*app_window.result_tree.get_children())
+    existing_items = app_window.result_tree.get_children()
+    
     for i, result in enumerate(results):
         file_path, similarity = result
         filename = os.path.basename(file_path)
-        app_window.result_tree.insert("", "end", values=(filename, file_path, f"{similarity:.2f}"))
+        values = (filename, file_path, f"{similarity:.2f}")
+        
+        if i < len(existing_items):
+            app_window.result_tree.item(existing_items[i], values=values)
+        else:
+            app_window.result_tree.insert("", "end", values=values)
+    
+    # Remove extra items if there are fewer results than existing items
+    for item in existing_items[len(results):]:
+        app_window.result_tree.delete(item)
 
 current_future = None
 def on_search_input_change(*args):
@@ -60,7 +70,6 @@ def on_search_input_change(*args):
             clear_results()
     except Exception as e:
         logger.error(f"Error during search: {e}")
-    clear_results()
 
 indexer.set_index_callback(on_search_input_change)
 
@@ -151,12 +160,6 @@ class App(tk.Tk):
         # Set the taskbar icon
         self.set_app_icon()
 
-    def set_app_icon(self):
-        icon_path = os.path.abspath(ICON_PATH)
-        img = Image.open(icon_path)
-        img = img.resize((32, 32), Image.LANCZOS)
-        photo = ImageTk.PhotoImage(img)
-        self.iconphoto(False, photo)
 
     def create_widgets(self):
         global update_button
@@ -208,6 +211,13 @@ class App(tk.Tk):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.result_tree.bind("<Double-1>", open_file)
+        
+    def set_app_icon(self):
+        icon_path = os.path.abspath(ICON_PATH)
+        img = Image.open(icon_path)
+        img = img.resize((32, 32), Image.LANCZOS)
+        photo = ImageTk.PhotoImage(img)
+        self.iconphoto(False, photo)
 
     def on_closing(self):
         self.withdraw()
