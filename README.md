@@ -6,7 +6,11 @@ Create a .env file and set the following parameters
 ```
 DB_PATH=<path to the sqllite db file>
 INDEX_DIRECTORIES=<comma seperated list of directories to index>
-RE_INDEX_INTERVAL_SECONDS=<time in seconds where the program will reupdate any changed files>
+```
+### Example
+```
+DB_PATH=./db.sqlite
+INDEX_DIRECTORIES=./notes,./school
 ```
 
 ## Installation
@@ -17,6 +21,9 @@ python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
 ```
+## Running
+`python -m llm_search.app`
+Run from within the repo directory
 
 ## Backend
 This project is designed for small document databases such as school notes or text files. Because of this, the backend uses SQLite and Faiss to handle embedding storage and search. By using small open-source LLMs, all embeddings occur on-device, ensuring privacy while still providing fast performance.

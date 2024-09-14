@@ -10,6 +10,7 @@ from llm_search.searcher import Searcher
 import pystray
 import subprocess
 import logging
+from llm_search.config import Config
 
 ICON_PATH = 'icon.ico'
 
@@ -17,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 indexer = Indexer()
-indexer.start_indexer_thread()
+indexer.start_indexer()
 searcher = Searcher(indexer_ref=indexer)
 
 def on_clicked(icon, item):
@@ -78,6 +79,24 @@ def load_icon_image(icon_path, size=(32, 32)):
         img = img.resize(size, Image.LANCZOS)
         return img
 
+import threading
+
+update_thread = None
+update_button = None
+
+def force_update():
+    global update_thread, update_button
+    
+    def update_task():
+        indexer.update_indexes(Config.INDEX_DIRECTORIES)
+        app_window.search_var.set(app_window.search_var.get())  # Trigger a new search
+        update_button.config(state='normal')  # Re-enable the button
+        
+    if update_thread is None or not update_thread.is_alive():
+        update_thread = threading.Thread(target=update_task)
+        update_thread.start()
+        update_button.config(state='disabled')  # Disable the button while updating
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -85,21 +104,23 @@ class App(tk.Tk):
         self.geometry('1000x700')
         self.minsize(800, 600)
         
-        self.configure(bg='#1E1E1E')
+        self.configure(bg='#2C2F33')
         self.font = font.nametofont("TkDefaultFont")
-        self.font.configure(size=14)
+        self.font.configure(size=12, family="Segoe UI")
         
         self.style = ttk.Style(self)
         self.style.theme_use('clam')
-        self.style.configure('TFrame', background='#1E1E1E')
-        self.style.configure('TLabel', background='#1E1E1E', foreground='#FFFFFF')
-        self.style.configure('TEntry', fieldbackground='#2E2E2E', foreground='#FFFFFF', borderwidth=0)
-        self.style.configure('Treeview', background='#2E2E2E', fieldbackground='#2E2E2E', foreground='#FFFFFF', borderwidth=0, rowheight=25)
-        self.style.configure('Treeview.Heading', background='#3E3E3E', foreground='#FFFFFF', borderwidth=0)
-        self.style.configure('TSeparator', background='#3E3E3E')
+        self.style.configure('TFrame', background='#2C2F33')
+        self.style.configure('TLabel', background='#2C2F33', foreground='#FFFFFF', font=('Segoe UI', 12))
+        self.style.configure('TEntry', fieldbackground='#23272A', foreground='#FFFFFF', borderwidth=0, font=('Segoe UI', 12))
+        self.style.configure('Treeview', background='#23272A', fieldbackground='#23272A', foreground='#FFFFFF', borderwidth=0, rowheight=30, font=('Segoe UI', 11))
+        self.style.configure('Treeview.Heading', background='#7289DA', foreground='#FFFFFF', borderwidth=1, font=('Segoe UI', 12, 'bold'))
+        self.style.configure('TSeparator', background='#7289DA')
         self.style.configure('Vertical.TScrollbar', gripcount=0,
-                            background='#2E2E2E', darkcolor='#1E1E1E', lightcolor='#3E3E3E',
-                            troughcolor='#2E2E2E', bordercolor='#1E1E1E', arrowcolor='#FFFFFF')
+                            background='#23272A', darkcolor='#2C2F33', lightcolor='#7289DA',
+                            troughcolor='#23272A', bordercolor='#2C2F33', arrowcolor='#FFFFFF')
+        self.style.configure('TButton', background='#7289DA', foreground='#FFFFFF', borderwidth=0, font=('Segoe UI', 12, 'bold'), padding=5)
+        self.style.map('TButton', background=[('active', '#677BC4')])
         
         self.create_widgets()
         
@@ -116,29 +137,33 @@ class App(tk.Tk):
         self.iconphoto(False, photo)
 
     def create_widgets(self):
+        global update_button
         main_frame = ttk.Frame(self, padding="30 30 30 30")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         search_frame = ttk.Frame(main_frame)
         search_frame.pack(fill=tk.X, pady=(0, 20))
         
-        search_label = ttk.Label(search_frame, text="Search:", font=('TkDefaultFont', 16))
+        search_label = ttk.Label(search_frame, text="Search:", font=('Segoe UI', 14, 'bold'))
         search_label.pack(side=tk.LEFT, padx=(0, 10))
         
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", on_search_input_change)
         
-        search_box = ttk.Entry(search_frame, textvariable=self.search_var, font=('TkDefaultFont', 16))
+        search_box = ttk.Entry(search_frame, textvariable=self.search_var, font=('Segoe UI', 14))
         search_box.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        top_n_label = ttk.Label(search_frame, text="Top N:", font=('TkDefaultFont', 16))
-        top_n_label.pack(side=tk.LEFT, padx=(10, 10))
+        top_n_label = ttk.Label(search_frame, text="Top N:", font=('Segoe UI', 14, 'bold'))
+        top_n_label.pack(side=tk.LEFT, padx=(20, 10))
         
         self.top_n_var = tk.StringVar(value='10')
         self.top_n_var.trace_add("write", on_search_input_change)
-        top_n_picker = ttk.Combobox(search_frame, textvariable=self.top_n_var, font=('TkDefaultFont', 16), state='readonly')
+        top_n_picker = ttk.Combobox(search_frame, textvariable=self.top_n_var, font=('Segoe UI', 14), state='readonly', width=5)
         top_n_picker['values'] = ('5', '10', '20', '50', 'all')
         top_n_picker.pack(side=tk.LEFT)
+        
+        update_button = ttk.Button(search_frame, text="Force Update", command=force_update, style='TButton')
+        update_button.pack(side=tk.RIGHT, padx=(20, 0))
         
         ttk.Separator(main_frame, orient='horizontal').pack(fill=tk.X, pady=20)
         
@@ -171,7 +196,7 @@ app_window = App()
 
 def on_quit(icon, item):
     searcher.shutdown()
-    indexer.stop_indexer_thread()
+    indexer.stop_indexer()
     icon.stop()
     app_window.destroy()
 
@@ -190,5 +215,5 @@ except Exception as e:
     logger.error(f"An error occurred in the main loop: {e}")
 finally:
     searcher.shutdown()
-    indexer.stop_indexer_thread()
+    indexer.stop_indexer()
     icon.stop()
